@@ -12,7 +12,7 @@ const employeeSchema = new mongoose.Schema(
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Company",
-      required: true,
+      required: false,
     },
 
     employeeNumber: {
@@ -47,6 +47,12 @@ const employeeSchema = new mongoose.Schema(
 
     hireDate: {
       type: Date,
+    },
+     status:{
+      type: String,
+      trim: true,
+      enum: ["absent", "present", "leave",],
+      default: "Present",
     },
   },
   {

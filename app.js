@@ -17,7 +17,6 @@ app.use(cors());
 app.use(express.json());
 
 
-
 app.post("/api/auth/register", async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
@@ -82,7 +81,171 @@ app.post("/api/auth/register", async (req, res) => {
     });
   }
 });
+app.post("/api/auth/register1", async (req, res) => {
+  const session = await mongoose.startSession();
 
+  try {
+    const {
+      // User
+      name,
+      email,
+      password,
+
+      // Employee
+      employeeNumber,
+      position,
+      nationality,
+      gender,
+      department,
+      phone,
+      hireDate,
+      status,
+      companyId,
+    } = req.body;
+
+
+
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Name, email and password are required",
+      });
+    }
+
+
+    const existingUser = await User.findOne({
+      email: email.toLowerCase(),
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "Email already registered",
+      });
+    }
+
+
+
+    session.startTransaction();
+
+
+    const hashedPassword = await bcrypt.hash(
+      password,
+      12
+    );
+
+
+
+    const users = await User.create(
+      [
+        {
+          name,
+          email: email.toLowerCase(),
+          password: hashedPassword,
+          role: "admin",
+        },
+      ],
+      { session }
+    );
+
+    const user = users[0];
+
+ 
+
+    const employees = await Employee.create(
+      [
+        {
+          userId: user._id,
+
+          // If you already have a company
+          companyId: companyId || null,
+
+          employeeNumber,
+          position,
+          nationality,
+          gender,
+          department,
+          phone,
+          hireDate,
+          status: status || "present",
+        },
+      ],
+      { session }
+    );
+
+    const employee = employees[0];
+
+   
+
+    await session.commitTransaction();
+
+  
+
+    const token = jwt.sign(
+      {
+        userId: user._id,
+        role: user.role,
+        employeeId: employee._id,
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn:
+          process.env.JWT_EXPIRES_IN || "7d",
+      }
+    );
+
+  
+
+    return res.status(201).json({
+      success: true,
+      message: "Owner registered successfully",
+
+      token,
+
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+
+      employee: {
+        id: employee._id,
+        userId: employee.userId,
+        companyId: employee.companyId,
+        employeeNumber: employee.employeeNumber,
+        position: employee.position,
+        nationality: employee.nationality,
+        gender: employee.gender,
+        department: employee.department,
+        phone: employee.phone,
+        hireDate: employee.hireDate,
+        status: employee.status,
+      },
+    });
+
+  } catch (error) {
+
+    // Abort only if transaction is active
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error(
+      "Register owner error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+
+  } finally {
+    await session.endSession();
+  }
+});
 
 //login
 app.post("/api/auth/login", async (req, res) => {
@@ -325,7 +488,7 @@ app.post(
         gender,
         department,
         phone,
-        hireDate,
+        hireDate,status
       } = req.body;
 
       const { companyId } = req.params;
@@ -337,7 +500,6 @@ app.post(
         });
       }
 
-      // Check company belongs to logged-in owner
       const company = await Company.findOne({
         _id: companyId,
         ownerId: req.user.userId,
@@ -398,6 +560,7 @@ app.post(
             department,
             phone,
             hireDate,
+            status
           },
         ],
         { session }
@@ -421,6 +584,7 @@ app.post(
           department: employee.department,
           phone: employee.phone,
           hireDate: employee.hireDate,
+          status:employee.status
         },
       });
 
@@ -611,6 +775,75 @@ app.put(
     }
   }
 );
+//get employee by id 
+app.get(
+  "/api/employees/:employeeId",
+  authMiddleware,
+  async (req, res) => {
+    try {
+      const { employeeId } = req.params;
+
+      const employee = await Employee.findById(employeeId)
+        .populate(
+          "userId",
+          "name email role isActive"
+        )
+        .populate(
+          "companyId",
+          "name email phone address"
+        );
+
+      if (!employee) {
+        return res.status(404).json({
+          success: false,
+          message: "Employee not found",
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        employee: {
+          id: employee._id,
+          userId: employee.userId?._id,
+
+          name: employee.userId?.name,
+          email: employee.userId?.email,
+          role: employee.userId?.role,
+          isActive: employee.userId?.isActive,
+
+          employeeNumber: employee.employeeNumber,
+          position: employee.position,
+          department: employee.department,
+          phone: employee.phone,
+          gender: employee.gender,
+          nationality: employee.nationality,
+          hireDate: employee.hireDate,
+          status: employee.status,
+
+          company: {
+            id: employee.companyId?._id,
+            name: employee.companyId?.name,
+            email: employee.companyId?.email,
+            phone: employee.companyId?.phone,
+            address: employee.companyId?.address,
+          },
+
+          createdAt: employee.createdAt,
+          updatedAt: employee.updatedAt,
+        },
+      });
+
+    } catch (error) {
+      console.error("Get employee error:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message,
+      });
+    }
+  }
+);
 //get list employee 
 app.get(
   "/api/companies/:companyId/employees",
@@ -633,6 +866,7 @@ app.get(
         });
       }
 
+      // Get employees
       const employees = await Employee.find({
         companyId: companyId,
       })
@@ -642,9 +876,49 @@ app.get(
         )
         .sort({ createdAt: -1 });
 
+
+
+      const maleCount = employees.filter(
+        (employee) =>
+          employee.gender?.toLowerCase() === "male"
+      ).length;
+
+      const femaleCount = employees.filter(
+        (employee) =>
+          employee.gender?.toLowerCase() === "female"
+      ).length;
+
+      const presentCount = employees.filter(
+        (employee) =>
+          employee.status?.toLowerCase() ===
+          "present"
+      ).length;
+
+      const absentCount = employees.filter(
+        (employee) =>
+          employee.status?.toLowerCase() ===
+          "absent"
+      ).length;
+
+      const leaveCount = employees.filter(
+        (employee) =>
+          employee.status?.toLowerCase() ===
+          "leave"
+      ).length;
+
       res.status(200).json({
         success: true,
+
         count: employees.length,
+
+        statistics: {
+          male: maleCount,
+          female: femaleCount,
+          present: presentCount,
+          absent: absentCount,
+          leave: leaveCount,
+        },
+
         employees,
       });
 
@@ -707,7 +981,7 @@ app.get(
     }
   }
 );
-// get one company
+// get one company Dashboard
 app.get(
   "/api/companies/:companyId",
   authMiddleware,
@@ -716,7 +990,7 @@ app.get(
     try {
       const { companyId } = req.params;
 
-      // Find company and make sure it belongs to logged-in owner
+      
       const company = await Company.findOne({
         _id: companyId,
         ownerId: req.user.userId,
@@ -729,15 +1003,153 @@ app.get(
         });
       }
 
-      // Get employees belonging to this company
+   
+
       const employees = await Employee.find({
         companyId: company._id,
       })
         .populate(
           "userId",
-          "name email role"
+          "name email role isActive"
         )
         .sort({ createdAt: -1 });
+
+    
+
+      const totalEmployees = employees.length;
+
+ 
+
+      const maleCount = employees.filter(
+        (employee) =>
+          employee.gender?.toLowerCase() === "male"
+      ).length;
+
+      const femaleCount = employees.filter(
+        (employee) =>
+          employee.gender?.toLowerCase() === "female"
+      ).length;
+
+     
+
+      const nationalityStats = {};
+
+      employees.forEach((employee) => {
+        const nationality =
+          employee.nationality?.trim() || "Unknown";
+
+        if (!nationalityStats[nationality]) {
+          nationalityStats[nationality] = 0;
+        }
+
+        nationalityStats[nationality]++;
+      });
+
+      // Convert object to array
+      const nationalities = Object.entries(
+        nationalityStats
+      ).map(([nationality, count]) => ({
+        nationality,
+        count,
+        percentage:
+          totalEmployees > 0
+            ? Number(
+                ((count / totalEmployees) * 100).toFixed(2)
+              )
+            : 0,
+      }));
+
+
+      const departmentStats = {};
+
+      employees.forEach((employee) => {
+        const department =
+          employee.department?.trim() || "Unknown";
+
+        if (!departmentStats[department]) {
+          departmentStats[department] = 0;
+        }
+
+        departmentStats[department]++;
+      });
+
+      const departments = Object.entries(
+        departmentStats
+      ).map(([department, count]) => ({
+        department,
+        count,
+        percentage:
+          totalEmployees > 0
+            ? Number(
+                ((count / totalEmployees) * 100).toFixed(2)
+              )
+            : 0,
+      }));
+
+
+    
+
+   
+      const presentCount =
+        employees.filter(
+          (attendance) =>
+            attendance.status?.toLowerCase() === "present"
+        ).length;
+
+      const absentCount =
+        employees.filter(
+          (attendance) =>
+            attendance.status?.toLowerCase() === "absent"
+        ).length;
+
+      const leaveCount =
+        employees.filter(
+          (attendance) =>
+            attendance.status?.toLowerCase() === "leave"
+        ).length;
+
+     const totalAttendance =
+  presentCount +
+  absentCount +
+  leaveCount;
+
+const attendancePercentage =
+  totalAttendance > 0
+    ? Number(
+        (
+          (presentCount / totalAttendance) *
+          100
+        ).toFixed(2)
+      )
+    : 0;
+
+   
+
+
+      const employeeList = employees.map(
+        (employee) => ({
+          id: employee._id,
+          userId: employee.userId?._id,
+
+          name: employee.userId?.name,
+          email: employee.userId?.email,
+          role: employee.userId?.role,
+          isActive: employee.userId?.isActive,
+
+          employeeNumber:
+            employee.employeeNumber,
+
+          position: employee.position,
+          department: employee.department,
+          phone: employee.phone,
+          gender: employee.gender,
+          nationality: employee.nationality,
+          hireDate: employee.hireDate,
+          status: employee.status
+        })
+      );
+
+     
 
       res.status(200).json({
         success: true,
@@ -749,28 +1161,35 @@ app.get(
           phone: company.phone,
           address: company.address,
           ownerId: company.ownerId,
-
-          employees: employees.map((employee) => ({
-            id: employee._id,
-            userId: employee.userId?._id,
-
-            name: employee.userId?.name,
-            email: employee.userId?.email,
-
-            employeeNumber: employee.employeeNumber,
-            position: employee.position,
-            department: employee.department,
-            phone: employee.phone,
-            gender: employee.gender,
-            nationality: employee.nationality,
-            hireDate: employee.hireDate,
-          })),
         },
+
+        dashboard: {
+          totalEmployees,
+
+          gender: {
+            male: maleCount,
+            female: femaleCount,
+          },
+
+          attendance: {
+            percentage: attendancePercentage,
+            present: presentCount,
+            absent: absentCount,
+            leave: leaveCount,
+            totalRecords: totalAttendance,
+          },
+
+          nationalities,
+
+          departments,
+        },
+
+        employees: employeeList,
       });
 
     } catch (error) {
       console.error(
-        "Get company with employees error:",
+        "Get company dashboard error:",
         error
       );
 
