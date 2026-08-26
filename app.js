@@ -247,7 +247,7 @@ app.post("/api/auth/register1", async (req, res) => {
   }
 });
 
-//login
+//login this register is the one we use cause its add user to emplyee table 
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -989,7 +989,7 @@ app.get(
   async (req, res) => {
     try {
       const { companyId } = req.params;
-
+console.log(req.user.userId);
       
       const company = await Company.findOne({
         _id: companyId,
@@ -1209,6 +1209,189 @@ app.get("/", (req, res) => {
 });
 
 
+
+const Event = require("./models/Events");
+
+
+const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+
+app.post(
+  "/api/events/",
+  authMiddleware,
+  ownerOnly , async (req, res) => {
+  try {
+    const {
+      companyId,
+      title,
+      description,
+      startDate,
+      endDate,
+      location,
+      targetType,
+      employeeId,
+      participants,
+    } = req.body;
+
+
+    if (!companyId || !isValidObjectId(companyId)) {
+      return res.status(400).json({ message: "A valid companyId is required." });
+    }
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({ message: "Title is required." });
+    }
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: "startDate and endDate are required." });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ message: "startDate/endDate must be valid dates." });
+    }
+
+    if (!(end > start)) {
+      return res.status(400).json({ message: "endDate must be after startDate." });
+    }
+
+    if (!["employee", "team", "company"].includes(targetType)) {
+      return res
+        .status(400)
+        .json({ message: "targetType must be 'employee', 'team' or 'company'." });
+    }
+
+    
+    const company = await Company.findById(companyId);
+
+    if (!company) {
+      return res.status(404).json({ message: "Company not found." });
+    }
+
+   
+    let resolvedEmployeeId = null;
+    let resolvedParticipants = [];
+
+    if (targetType === "employee") {
+      if (!employeeId || !isValidObjectId(employeeId)) {
+        return res.status(400).json({ message: "A valid employeeId is required." });
+      }
+
+      const employee = await Employee.findById(employeeId);
+
+      if (!employee) {
+        return res.status(404).json({ message: "Employee not found." });
+      }
+
+      if (String(employee.companyId) !== String(companyId)) {
+        return res
+          .status(400)
+          .json({ message: "This employee does not belong to the selected company." });
+      }
+
+      resolvedEmployeeId = employee._id;
+    }
+
+    if (targetType === "team") {
+      if (!Array.isArray(participants) || participants.length === 0) {
+        return res
+          .status(400)
+          .json({ message: "At least one participant is required for a team event." });
+      }
+
+      const invalidIds = participants.filter((id) => !isValidObjectId(id));
+
+      if (invalidIds.length > 0) {
+        return res.status(400).json({ message: "One or more participant IDs are invalid." });
+      }
+
+      const foundEmployees = await Employee.find({
+        _id: { $in: participants },
+        companyId,
+      }).select("_id");
+
+      if (foundEmployees.length !== participants.length) {
+        return res.status(400).json({
+          message:
+            "One or more selected employees were not found or do not belong to this company.",
+        });
+      }
+
+      resolvedParticipants = foundEmployees.map((e) => e._id);
+    }
+
+    if (targetType === "company") {
+      // "Everyone": resolve server-side so the audience is captured
+      // at creation time rather than recomputed dynamically later.
+      const allEmployees = await Employee.find({ companyId }).select("_id");
+
+      if (allEmployees.length === 0) {
+        return res
+          .status(400)
+          .json({ message: "This company has no employees to invite." });
+      }
+
+      resolvedParticipants = allEmployees.map((e) => e._id);
+    }
+
+   
+    const event = await Event.create({
+      companyId,
+      title: title.trim(),
+      description: description ? description.trim() : "",
+      location: location ? location.trim() : "",
+      startDate: start,
+      endDate: end,
+      targetType,
+      employeeId: resolvedEmployeeId,
+      participants: resolvedParticipants,
+      createdBy:  req.user.userId, // requires an auth middleware setting req.user
+    });
+
+    return res.status(201).json({
+      message: "Event created successfully.",
+      event,
+    });
+  } catch (error) {
+    console.error("createEvent error:", error);
+    return res.status(500).json({ message: "Something went wrong while creating the event." });
+  }
+});
+
+app.get(
+  "/api/events/all",
+  authMiddleware,
+    async (req, res) => {
+  try {
+    if (!req.user || !req.user.userId) {
+      return res.status(401).json({ message: "Not authenticated." });
+    }
+
+    const events = await Event.find({ createdBy: req.user.userId })
+      .sort({ startDate: -1 })
+      .populate("companyId", "name")
+      .populate({
+        path: "employeeId",
+        select: "position department userId",
+        populate: { path: "userId", select: "name" },
+      })
+      .populate({
+        path: "participants",
+        select: "position department userId",
+        populate: { path: "userId", select: "name" },
+      });
+
+    return res.status(200).json({
+      message: "Events fetched successfully.",
+      events,
+    });
+  } catch (error) {
+    console.error("getMyEvents error:", error);
+    return res.status(500).json({ message: "Something went wrong while fetching events." });
+  }
+});
 //
 const PORT = process.env.PORT || 5000;
 
