@@ -981,6 +981,65 @@ app.get(
     }
   }
 );
+//get current employee /**
+
+app.get("/api/employeescurrent/", authMiddleware, async (req, res) => {
+  try {
+    if (!req.user || !req.user.userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Not authenticated",
+      });
+    }
+
+    const employee = await Employee.findOne({ userId: req.user.userId })
+      .populate("userId", "name email role isActive")
+      .populate("companyId", "name email phone address");
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "No employee profile found for this user",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      employee: {
+        id: employee._id,
+        userId: employee.userId?._id,
+        name: employee.userId?.name,
+        email: employee.userId?.email,
+        role: employee.userId?.role,
+        isActive: employee.userId?.isActive,
+        employeeNumber: employee.employeeNumber,
+        position: employee.position,
+        department: employee.department,
+        phone: employee.phone,
+        gender: employee.gender,
+        nationality: employee.nationality,
+        hireDate: employee.hireDate,
+        status: employee.status,
+        company: {
+          id: employee.companyId?._id,
+          name: employee.companyId?.name,
+          email: employee.companyId?.email,
+          phone: employee.companyId?.phone,
+          address: employee.companyId?.address,
+        },
+        createdAt: employee.createdAt,
+        updatedAt: employee.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error("Get employee by token error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+});
 // get one company Dashboard
 app.get(
   "/api/companies/:companyId",
@@ -1359,7 +1418,7 @@ app.post(
     return res.status(500).json({ message: "Something went wrong while creating the event." });
   }
 });
-
+//get all events 
 app.get(
   "/api/events/all",
   authMiddleware,
@@ -1392,7 +1451,257 @@ app.get(
     return res.status(500).json({ message: "Something went wrong while fetching events." });
   }
 });
+//update status events
+/**
+ * Both routes below reuse the exact same validation building blocks
+ * as the createEvent route you shared (isValidObjectId checks,
+ * Company/Employee existence + ownership checks, resolvedEmployeeId /
+ * resolvedParticipants pattern).
+ *
+ * NOTE: I matched `createdBy: req.user.userId` from your snippet
+ * (not `req.user._id`) — make sure authMiddleware really sets
+ * `req.user.userId`, otherwise both ownership checks below will
+ * always fail.
+ */
+
+// ============================================================
+// PATCH /api/events/:eventId/status
+// Small, focused endpoint: only changes the status field.
+// ============================================================
+app.patch(
+  "/api/events/:eventId/status",
+  authMiddleware,
+  ownerOnly,
+  async (req, res) => {
+    try {
+      const { eventId } = req.params;
+      const { status } = req.body;
+
+      if (!isValidObjectId(eventId)) {
+        return res.status(400).json({ message: "A valid eventId is required." });
+      }
+
+      if (!["scheduled", "cancelled", "completed"].includes(status)) {
+        return res
+          .status(400)
+          .json({ message: "status must be 'scheduled', 'cancelled' or 'completed'." });
+      }
+
+      const event = await Event.findById(eventId);
+
+      if (!event) {
+        return res.status(404).json({ message: "Event not found." });
+      }
+
+      // Only the event's creator can change its status.
+      // Remove this block if `ownerOnly` already enforces the right
+      // scope (e.g. company-level ownership) and per-resource
+      // creator checks would be redundant.
+      if (String(event.createdBy) !== String(req.user.userId)) {
+        return res
+          .status(403)
+          .json({ message: "You are not allowed to update this event." });
+      }
+
+      if (event.status === status) {
+        return res.status(200).json({
+          message: `Event is already '${status}'.`,
+          event,
+        });
+      }
+
+      event.status = status;
+      await event.save();
+
+      return res.status(200).json({
+        message: "Event status updated successfully.",
+        event,
+      });
+    } catch (error) {
+      console.error("updateEventStatus error:", error);
+      return res
+        .status(500)
+        .json({ message: "Something went wrong while updating the event status." });
+    }
+  }
+);
+
+// ============================================================
+// PUT /api/events/:eventId
+// Full update, mirrors createEvent's validation logic.
 //
+// Design choice: `companyId` is NOT editable here — an event stays
+// attached to the company it was created for. If you actually need
+// to move an event to a different company, say so and I'll add that
+// (it changes the employee/participants validation quite a bit).
+// ============================================================
+app.put(
+  "/api/events/:eventId",
+  authMiddleware,
+  ownerOnly,
+  async (req, res) => {
+    try {
+      const { eventId } = req.params;
+
+      if (!isValidObjectId(eventId)) {
+        return res.status(400).json({ message: "A valid eventId is required." });
+      }
+
+      const event = await Event.findById(eventId);
+
+      if (!event) {
+        return res.status(404).json({ message: "Event not found." });
+      }
+
+      if (String(event.createdBy) !== String(req.user.userId)) {
+        return res
+          .status(403)
+          .json({ message: "You are not allowed to update this event." });
+      }
+
+      const {
+        title,
+        description,
+        startDate,
+        endDate,
+        location,
+        targetType,
+        employeeId,
+        participants,
+      } = req.body;
+
+      const companyId = event.companyId; 
+
+      if (title !== undefined) {
+        if (!title || !title.trim()) {
+          return res.status(400).json({ message: "Title is required." });
+        }
+        event.title = title.trim();
+      }
+
+      if (description !== undefined) {
+        event.description = description ? description.trim() : "";
+      }
+
+      if (location !== undefined) {
+        event.location = location ? location.trim() : "";
+      }
+
+   
+      let start = event.startDate;
+      let end = event.endDate;
+
+      if (startDate !== undefined) {
+        start = new Date(startDate);
+        if (isNaN(start.getTime())) {
+          return res.status(400).json({ message: "startDate must be a valid date." });
+        }
+      }
+
+      if (endDate !== undefined) {
+        end = new Date(endDate);
+        if (isNaN(end.getTime())) {
+          return res.status(400).json({ message: "endDate must be a valid date." });
+        }
+      }
+
+      if (!(end > start)) {
+        return res.status(400).json({ message: "endDate must be after startDate." });
+      }
+
+      event.startDate = start;
+      event.endDate = end;
+
+  
+      if (targetType !== undefined) {
+        if (!["employee", "team", "company"].includes(targetType)) {
+          return res
+            .status(400)
+            .json({ message: "targetType must be 'employee', 'team' or 'company'." });
+        }
+
+        let resolvedEmployeeId = null;
+        let resolvedParticipants = [];
+
+        if (targetType === "employee") {
+          if (!employeeId || !isValidObjectId(employeeId)) {
+            return res.status(400).json({ message: "A valid employeeId is required." });
+          }
+
+          const employee = await Employee.findById(employeeId);
+
+          if (!employee) {
+            return res.status(404).json({ message: "Employee not found." });
+          }
+
+          if (String(employee.companyId) !== String(companyId)) {
+            return res
+              .status(400)
+              .json({ message: "This employee does not belong to the event's company." });
+          }
+
+          resolvedEmployeeId = employee._id;
+        }
+
+        if (targetType === "team") {
+          if (!Array.isArray(participants) || participants.length === 0) {
+            return res
+              .status(400)
+              .json({ message: "At least one participant is required for a team event." });
+          }
+
+          const invalidIds = participants.filter((id) => !isValidObjectId(id));
+
+          if (invalidIds.length > 0) {
+            return res.status(400).json({ message: "One or more participant IDs are invalid." });
+          }
+
+          const foundEmployees = await Employee.find({
+            _id: { $in: participants },
+            companyId,
+          }).select("_id");
+
+          if (foundEmployees.length !== participants.length) {
+            return res.status(400).json({
+              message:
+                "One or more selected employees were not found or do not belong to this company.",
+            });
+          }
+
+          resolvedParticipants = foundEmployees.map((e) => e._id);
+        }
+
+        if (targetType === "company") {
+          const allEmployees = await Employee.find({ companyId }).select("_id");
+
+          if (allEmployees.length === 0) {
+            return res
+              .status(400)
+              .json({ message: "This company has no employees to invite." });
+          }
+
+          resolvedParticipants = allEmployees.map((e) => e._id);
+        }
+
+        event.targetType = targetType;
+        event.employeeId = resolvedEmployeeId;
+        event.participants = resolvedParticipants;
+      }
+
+      await event.save();
+
+      return res.status(200).json({
+        message: "Event updated successfully.",
+        event,
+      });
+    } catch (error) {
+      console.error("updateEvent error:", error);
+      return res
+        .status(500)
+        .json({ message: "Something went wrong while updating the event." });
+    }
+  }
+);
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
