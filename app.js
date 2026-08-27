@@ -1451,23 +1451,7 @@ app.get(
     return res.status(500).json({ message: "Something went wrong while fetching events." });
   }
 });
-//update status events
-/**
- * Both routes below reuse the exact same validation building blocks
- * as the createEvent route you shared (isValidObjectId checks,
- * Company/Employee existence + ownership checks, resolvedEmployeeId /
- * resolvedParticipants pattern).
- *
- * NOTE: I matched `createdBy: req.user.userId` from your snippet
- * (not `req.user._id`) — make sure authMiddleware really sets
- * `req.user.userId`, otherwise both ownership checks below will
- * always fail.
- */
 
-// ============================================================
-// PATCH /api/events/:eventId/status
-// Small, focused endpoint: only changes the status field.
-// ============================================================
 app.patch(
   "/api/events/:eventId/status",
   authMiddleware,
@@ -1526,15 +1510,7 @@ app.patch(
   }
 );
 
-// ============================================================
-// PUT /api/events/:eventId
-// Full update, mirrors createEvent's validation logic.
-//
-// Design choice: `companyId` is NOT editable here — an event stays
-// attached to the company it was created for. If you actually need
-// to move an event to a different company, say so and I'll add that
-// (it changes the employee/participants validation quite a bit).
-// ============================================================
+
 app.put(
   "/api/events/:eventId",
   authMiddleware,
@@ -1702,6 +1678,51 @@ app.put(
     }
   }
 );
+
+app.get("/api/events/attending", authMiddleware, async (req, res) => {
+  try {
+    if (!req.user || !req.user.userId) {
+      return res.status(401).json({ message: "Not authenticated." });
+    }
+
+    // The event stores Employee ids, not User ids — resolve the
+    // current user's Employee document first.
+    const employee = await Employee.findOne({ userId: req.user.userId }).select("_id");
+
+    if (!employee) {
+      return res.status(404).json({ message: "No employee profile found for this user." });
+    }
+
+    const events = await Event.find({
+      $or: [
+        { employeeId: employee._id },
+        { participants: employee._id },
+      ],
+    })
+      .sort({ startDate: -1 })
+      .populate("companyId", "name")
+      .populate({
+        path: "employeeId",
+        select: "position department userId",
+        populate: { path: "userId", select: "name" },
+      })
+      .populate({
+        path: "participants",
+        select: "position department userId",
+        populate: { path: "userId", select: "name" },
+      });
+
+    return res.status(200).json({
+      message: "Events fetched successfully.",
+      events,
+    });
+  } catch (error) {
+    console.error("getEventsAttending error:", error);
+    return res
+      .status(500)
+      .json({ message: "Something went wrong while fetching events." });
+  }
+});
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
