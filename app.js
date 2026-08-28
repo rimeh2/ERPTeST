@@ -1685,8 +1685,6 @@ app.get("/api/events/attending", authMiddleware, async (req, res) => {
       return res.status(401).json({ message: "Not authenticated." });
     }
 
-    // The event stores Employee ids, not User ids — resolve the
-    // current user's Employee document first.
     const employee = await Employee.findOne({ userId: req.user.userId }).select("_id");
 
     if (!employee) {
@@ -1723,6 +1721,93 @@ app.get("/api/events/attending", authMiddleware, async (req, res) => {
       .json({ message: "Something went wrong while fetching events." });
   }
 });
+app.delete(
+  "/api/events/:eventId",
+  authMiddleware,
+  ownerOnly,
+  async (req, res) => {
+    try {
+      const { eventId } = req.params;
+
+      if (!eventId || !isValidObjectId(eventId)) {
+        return res.status(400).json({ message: "A valid eventId is required." });
+      }
+
+      const event = await Event.findById(eventId);
+
+      if (!event) {
+        return res.status(404).json({ message: "Event not found." });
+      }
+
+      const { companyId } = req.body;
+
+      if (companyId) {
+        if (!isValidObjectId(companyId)) {
+          return res.status(400).json({ message: "A valid companyId is required." });
+        }
+
+        if (String(event.companyId) !== String(companyId)) {
+          return res
+            .status(400)
+            .json({ message: "This event does not belong to the selected company." });
+        }
+      }
+
+      await Event.deleteOne({ _id: eventId });
+
+      return res.status(200).json({
+        message: "Event deleted successfully.",
+      });
+    } catch (error) {
+      console.error("deleteEvent error:", error);
+      return res.status(500).json({ message: "Something went wrong while deleting the event." });
+    }
+  }
+);
+// get all employees belonging to the logged-in owner, across all their companies
+app.get(
+  "/api/employees",
+  authMiddleware,
+  ownerOnly,
+  async (req, res) => {
+    try {
+      // Find every company this owner has
+      const companies = await Company.find({
+        ownerId: req.user.userId,
+      }).select("_id name");
+
+      if (companies.length === 0) {
+        return res.status(200).json({
+          success: true,
+          count: 0,
+          employees: [],
+        });
+      }
+
+      const companyIds = companies.map((c) => c._id);
+
+      const employees = await Employee.find({
+        companyId: { $in: companyIds },
+      })
+        .populate("userId", "name email role isActive")
+        .populate("companyId", "name")
+        .sort({ createdAt: -1 });
+
+      return res.status(200).json({
+        success: true,
+        count: employees.length,
+        employees,
+      });
+    } catch (error) {
+      console.error("getAllOwnerEmployees error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message,
+      });
+    }
+  }
+);
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
