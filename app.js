@@ -1721,6 +1721,7 @@ app.get("/api/events/attending", authMiddleware, async (req, res) => {
       .json({ message: "Something went wrong while fetching events." });
   }
 });
+// delet event 
 app.delete(
   "/api/events/:eventId",
   authMiddleware,
@@ -1730,32 +1731,32 @@ app.delete(
       const { eventId } = req.params;
 
       if (!eventId || !isValidObjectId(eventId)) {
-        return res.status(400).json({ message: "A valid eventId is required." });
+        return res.status(400).json({ status :false ,message: "A valid eventId is required." });
       }
 
       const event = await Event.findById(eventId);
 
       if (!event) {
-        return res.status(404).json({ message: "Event not found." });
+        return res.status(404).json({ status :false ,message: "Event not found." });
       }
 
       const { companyId } = req.body;
 
       if (companyId) {
         if (!isValidObjectId(companyId)) {
-          return res.status(400).json({ message: "A valid companyId is required." });
+          return res.status(400).json({ status :false,message: "A valid companyId is required." });
         }
 
         if (String(event.companyId) !== String(companyId)) {
           return res
             .status(400)
-            .json({ message: "This event does not belong to the selected company." });
+            .json({status:false ,  message: "This event does not belong to the selected company." });
         }
       }
 
       await Event.deleteOne({ _id: eventId });
 
-      return res.status(200).json({
+      return res.status(200).json({status:true , 
         message: "Event deleted successfully.",
       });
     } catch (error) {
