@@ -744,7 +744,111 @@ app.delete(
   }
 );
 //update employee 
+app.put(
+  "/api/employees/:id",
+  authMiddleware,
+  ownerOnly,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
 
+      if (!isValidObjectId(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "A valid employee id is required.",
+        });
+      }
+
+      const employee = await Employee.findById(id);
+
+      if (!employee) {
+        return res.status(404).json({
+          success: false,
+          message: "Employee not found",
+        });
+      }
+
+      // Make sure this employee belongs to a company owned by the requester.
+      const company = await Company.findOne({
+        _id: employee.companyId,
+        ownerId: req.user.userId,
+      });
+
+      if (!company) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied",
+        });
+      }
+
+      const {
+        name,
+        email,
+        employeeNumber,
+        position,
+        department,
+        phone,
+        gender,
+        nationality,
+        hireDate,
+        status,
+      } = req.body;
+
+      if (status !== undefined && !["present", "absent", "leave"].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: "status must be 'present', 'absent' or 'leave'.",
+        });
+      }
+
+      // --- Linked User fields ---
+      const user = await User.findByIdAndUpdate(
+        employee.userId,
+        {
+          ...(name !== undefined && { name }),
+          ...(email !== undefined && { email: email.toLowerCase() }),
+        },
+        { new: true, runValidators: true }
+      );
+
+      // --- Employee fields ---
+      const updatedEmployee = await Employee.findByIdAndUpdate(
+        employee._id,
+        {
+          ...(employeeNumber !== undefined && { employeeNumber }),
+          ...(position !== undefined && { position }),
+          ...(department !== undefined && { department }),
+          ...(phone !== undefined && { phone }),
+          ...(gender !== undefined && { gender }),
+          ...(nationality !== undefined && { nationality }),
+          ...(hireDate !== undefined && { hireDate }),
+          ...(status !== undefined && { status }),
+        },
+        { new: true, runValidators: true }
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: "Employee updated successfully",
+        employee: {
+          ...updatedEmployee.toObject(),
+          user: {
+            name: user.name,
+            email: user.email,
+            role: user.role,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("updateEmployeeById error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Server error",
+      });
+    }
+  }
+);
+//current employee update 
 
 app.put("/api/employees/me", authMiddleware, async (req, res) => {
   try {
