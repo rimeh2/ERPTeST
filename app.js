@@ -743,6 +743,77 @@ app.delete(
     }
   }
 );
+//current employee update 
+
+app.put("/api/employees/me", authMiddleware, async (req, res) => {
+  try {
+    if (!req.user || !req.user.userId) {
+      return res.status(401).json({ success: false, message: "Not authenticated" });
+    }
+
+    const employee = await Employee.findOne({ userId: req.user.userId });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "No employee profile found for this user",
+      });
+    }
+
+    const {
+      name,
+      email,
+      employeeNumber,
+      position,
+      department,
+      phone,
+      gender,
+      nationality,
+      hireDate,
+    } = req.body;
+
+    // --- Linked User fields ---
+    const user = await User.findByIdAndUpdate(
+      employee.userId,
+      {
+        ...(name !== undefined && { name }),
+        ...(email !== undefined && { email: email.toLowerCase() }),
+      },
+      { new: true, runValidators: true }
+    );
+
+    // --- Employee fields ---
+    const updatedEmployee = await Employee.findByIdAndUpdate(
+      employee._id,
+      {
+        ...(employeeNumber !== undefined && { employeeNumber }),
+        ...(position !== undefined && { position }),
+        ...(department !== undefined && { department }),
+        ...(phone !== undefined && { phone }),
+        ...(gender !== undefined && { gender }),
+        ...(nationality !== undefined && { nationality }),
+        ...(hireDate !== undefined && { hireDate }),
+      },
+      { new: true, runValidators: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      employee: {
+        ...updatedEmployee.toObject(),
+        user: {
+          name: user.name,
+          email: user.email,
+          role: user.role,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("updateCurrentEmployee error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
 //update employee 
 app.put(
   "/api/employees/:id",
@@ -848,82 +919,12 @@ app.put(
     }
   }
 );
-//current employee update 
 
-app.put("/api/employees/me", authMiddleware, async (req, res) => {
-  try {
-    if (!req.user || !req.user.userId) {
-      return res.status(401).json({ success: false, message: "Not authenticated" });
-    }
-
-    const employee = await Employee.findOne({ userId: req.user.userId });
-
-    if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: "No employee profile found for this user",
-      });
-    }
-
-    const {
-      name,
-      email,
-      employeeNumber,
-      position,
-      department,
-      phone,
-      gender,
-      nationality,
-      hireDate,
-    } = req.body;
-
-    // --- Linked User fields ---
-    const user = await User.findByIdAndUpdate(
-      employee.userId,
-      {
-        ...(name !== undefined && { name }),
-        ...(email !== undefined && { email: email.toLowerCase() }),
-      },
-      { new: true, runValidators: true }
-    );
-
-    // --- Employee fields ---
-    const updatedEmployee = await Employee.findByIdAndUpdate(
-      employee._id,
-      {
-        ...(employeeNumber !== undefined && { employeeNumber }),
-        ...(position !== undefined && { position }),
-        ...(department !== undefined && { department }),
-        ...(phone !== undefined && { phone }),
-        ...(gender !== undefined && { gender }),
-        ...(nationality !== undefined && { nationality }),
-        ...(hireDate !== undefined && { hireDate }),
-      },
-      { new: true, runValidators: true }
-    );
-
-    return res.status(200).json({
-      success: true,
-      message: "Profile updated successfully",
-      employee: {
-        ...updatedEmployee.toObject(),
-        user: {
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-      },
-    });
-  } catch (error) {
-    console.error("updateCurrentEmployee error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
-  }
-});
 //get employee by id 
 app.get(
   "/api/employees/:employeeId",
   authMiddleware,
-  async (req, res) => {
+  async (req, res) => {a
     try {
       const { employeeId } = req.params;
 
